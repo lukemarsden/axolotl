@@ -51,7 +51,7 @@ def print_axolotl_text_art(suffix=None):
 
 
 def get_multi_line_input() -> Optional[str]:
-    print("Give me an instruction (Ctrl + D to submit): ")
+    #print("Give me an instruction (Ctrl + D to submit): ")
     instruction = ""
     for line in sys.stdin:
         instruction += line  # pylint: disable=consider-using-join
@@ -111,7 +111,7 @@ def do_inference(
     model = model.to(cfg.device)
 
     while True:
-        print("=" * 80)
+        #print("=" * 80)
         # support for multiline inputs
         instruction = get_multi_line_input()
         if not instruction:
@@ -124,7 +124,7 @@ def do_inference(
             prompt = instruction.strip()
         batch = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
 
-        print("=" * 40)
+        print("[START]")
         model.eval()
         with torch.no_grad():
             generation_config = GenerationConfig(
@@ -149,8 +149,8 @@ def do_inference(
                 generation_config=generation_config,
                 streamer=streamer,
             )
-        print("=" * 40)
-        print(tokenizer.decode(generated["sequences"].cpu().tolist()[0]))
+        #print("=" * 40)
+        #print(tokenizer.decode(generated["sequences"].cpu().tolist()[0]))
 
 
 def choose_config(path: Path):
