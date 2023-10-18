@@ -14,7 +14,8 @@ RUN apt-get update && \
 
 WORKDIR /workspace
 
-RUN git clone --depth=1 https://github.com/OpenAccess-AI-Collective/axolotl.git
+ADD . /workspace
+#RUN git clone --depth=1 https://github.com/OpenAccess-AI-Collective/axolotl.git
 
 WORKDIR /workspace/axolotl
 
