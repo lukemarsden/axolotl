@@ -33,3 +33,5 @@ RUN git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" && \
 
 # helper for huggingface-login cli
 RUN git config --global credential.helper store
+
+RUN python3 -c "from transformers import AutoModelForCausalLM; model_id = 'mistralai/Mistral-7B-Instruct-v0.1'; AutoModelForCausalLM.from_pretrained(model_id)"
