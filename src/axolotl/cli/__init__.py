@@ -6,6 +6,7 @@ import os
 import random
 import sys
 import io
+import base64
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import json
@@ -175,31 +176,43 @@ def do_inference(
 
     model = model.to(cfg.device)
 
+    hasRunInitialJob = False
+    initialJobData = os.environ.get("HELIX_INITIAL_JOB_DATA_BASE64", None)
+
     while True:
         if currentOutputChunks != "":
             print("--------------------------------------------------\n")
             print(currentOutputChunks)
             print("--------------------------------------------------\n")
         currentOutputChunks = ""
+        currentJobData = ""
 
-        response = requests.get(getJobURL)
+        if initialJobData is not None and hasRunInitialJob is False:
+            decoded_bytes = base64.b64decode(initialJobData)
+            currentJobData = decoded_bytes.decode("utf-8")
+            hasRunInitialJob = True
+        else:
+            # TODO: we need to include the fine-tuning model here
+            response = requests.get(f"{getJobURL}?mode=Create&type=Text&model_name=mistralai/Mistral-7B-Instruct-v0.1")
 
-        if response.status_code != 200:
-            time.sleep(0.1)
-            waitLoops = waitLoops + 1
-            if waitLoops % 10 == 0:
-                print("--------------------------------------------------\n")
-                current_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                print(f"{current_timestamp} waiting for next job")
-            continue
+            if response.status_code != 200:
+                time.sleep(0.1)
+                waitLoops = waitLoops + 1
+                if waitLoops % 10 == 0:
+                    print("--------------------------------------------------\n")
+                    current_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    print(f"{current_timestamp} waiting for next job")
+                continue
 
-        waitLoops = 0
+            waitLoops = 0
+            currentJobData = response.content
+
         # print out the response content to stdout
         print("--------------------------------------------------\n")
-        print(response.content)
+        print(currentJobData)
         print("--------------------------------------------------\n")
 
-        task = json.loads(response.content)
+        task = json.loads(currentJobData)
         instruction: str = task["prompt"]
 
         send_response(respondJobURL, task["session_id"], "begin", "")
