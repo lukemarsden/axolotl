@@ -5,11 +5,15 @@ import logging
 import os
 import random
 import sys
+import io
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
-
+import json
+import time
+import requests
 import torch
 import yaml
+from contextlib import contextmanager
 
 # add src to the pythonpath so we don't need to pip install this
 from accelerate.commands.config import config_args
@@ -79,12 +83,69 @@ def do_merge_lora(
         )
         tokenizer.save_pretrained(str(Path(cfg.output_dir) / "merged"))
 
+currentOutputChunks = ""
+
+@contextmanager
+def redirect_stdout_to_function(func, buffer_size=1024, url="", sessionid=""):
+    class BufferedBytesStream(io.BytesIO):
+        def __init__(self, buffer_size):
+            super().__init__()
+            self.buffer_size = buffer_size
+            self.buffer = bytearray()
+
+        def write(self, b):
+            if isinstance(b, str):
+                b = b.encode('utf-8')
+            self.buffer.extend(b)
+            while len(self.buffer) >= self.buffer_size:
+                chunk, self.buffer = self.buffer[:self.buffer_size], self.buffer[self.buffer_size:]
+                # this is capture_model_output_chunk
+                func(url, sessionid, chunk)
+
+    original_stdout = sys.stdout
+    sys.stdout = BufferedBytesStream(buffer_size)
+    
+    try:
+        yield
+    finally:
+        # Flush remaining bytes in buffer, if any
+        if len(sys.stdout.buffer) > 0:
+            # this is capture_model_output_chunk
+            func(url, sessionid, sys.stdout.buffer)
+        sys.stdout = original_stdout
+
+def send_response(url, session_id, action, message):
+    json_payload = json.dumps({
+        "action": action,
+        "session_id": session_id,
+        "message": message
+    })
+    requests.post(url, data=json_payload)
+
+def capture_model_output_chunk(url, session_id, b):
+    global currentOutputChunks
+    message = b.decode('utf-8')
+    currentOutputChunks = currentOutputChunks + message
+    send_response(url, session_id, "continue", message)
 
 def do_inference(
     *,
     cfg: DictDefault,
     cli_args: TrainerCliArgs,
 ):
+    global currentOutputChunks
+    # the url of where we ask for new jobs
+    # as soon as we have finished the current job, we will ask for another one
+    # if this fails - it means there are no jobs so wait 1 second then ask again
+    getJobURL = os.environ.get("HELIX_GET_JOB_URL", None)
+    respondJobURL = os.environ.get("HELIX_RESPOND_JOB_URL", None)
+
+    if getJobURL is None:
+        sys.exit("HELIX_GET_JOB_URL is not set")
+
+    if respondJobURL is None:
+        sys.exit("HELIX_RESPOND_JOB_URL is not set")
+
     model, tokenizer = load_model_and_tokenizer(cfg=cfg, cli_args=cli_args)
     prompter = cli_args.prompter
     default_tokens = {"unk_token": "<unk>", "bos_token": "<s>", "eos_token": "</s>"}
@@ -111,11 +172,28 @@ def do_inference(
     model = model.to(cfg.device)
 
     while True:
-        print("=" * 80)
-        # support for multiline inputs
-        instruction = get_multi_line_input()
-        if not instruction:
-            return
+        if currentOutputChunks != "":
+            print("--------------------------------------------------\n")
+            print(currentOutputChunks)
+            print("--------------------------------------------------\n")
+        currentOutputChunks = ""
+
+        response = requests.get(getJobURL)
+
+        if response.status_code != 200:
+            time.sleep(0.1)
+            continue
+        
+        # print out the response content to stdout
+        print("--------------------------------------------------\n")
+        print(response.content)
+        print("--------------------------------------------------\n")
+        
+        task = json.loads(response.content)
+        instruction: str = task["prompt"]
+
+        send_response(respondJobURL, task["session_id"], "begin", "")
+        
         if prompter_module:
             prompt: str = next(
                 prompter_module().build_prompt(instruction=instruction.strip("\n"))
@@ -123,9 +201,8 @@ def do_inference(
         else:
             prompt = instruction.strip()
         batch = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
-
-        print("=" * 40)
         model.eval()
+
         with torch.no_grad():
             generation_config = GenerationConfig(
                 repetition_penalty=1.1,
@@ -144,15 +221,17 @@ def do_inference(
                 output_scores=False,
             )
             streamer = TextStreamer(tokenizer)
-            generated = model.generate(
-                inputs=batch["input_ids"].to(cfg.device),
-                generation_config=generation_config,
-                streamer=streamer,
-            )
-        print("=" * 40)
-        print(tokenizer.decode(generated["sequences"].cpu().tolist()[0]))
-
-
+            with redirect_stdout_to_function(capture_model_output_chunk, buffer_size=20, url=respondJobURL, sessionid=task["session_id"]):
+                generated = model.generate(
+                    inputs=batch["input_ids"].to(cfg.device),
+                    generation_config=generation_config,
+                    streamer=streamer,
+                )
+                print("=" * 40)
+                print(tokenizer.decode(generated["sequences"].cpu().tolist()[0]))
+                print("=" * 40)
+                send_response(respondJobURL, task["session_id"], "end", "")
+      
 def choose_config(path: Path):
     yaml_files = list(path.glob("*.yml"))
 
