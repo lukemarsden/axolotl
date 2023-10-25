@@ -119,7 +119,7 @@ def redirect_stdout_to_function(func, buffer_size=1024, url="", sessionid=""):
 
 def send_response(url, session_id, action, message):
     json_payload = json.dumps({
-        "action": action,
+        "type": action,
         "session_id": session_id,
         "message": message
     })
@@ -129,7 +129,7 @@ def capture_model_output_chunk(url, session_id, b):
     global currentOutputChunks
     message = b.decode('utf-8')
     currentOutputChunks = currentOutputChunks + message
-    send_response(url, session_id, "continue", message)
+    send_response(url, session_id, "stream", message)
 
 def do_inference(
     *,
@@ -176,14 +176,23 @@ def do_inference(
 
     model = model.to(cfg.device)
 
+    session_id = ""
+    last_prompt = ""
     hasRunInitialJob = False
     initialJobData = os.environ.get("HELIX_INITIAL_JOB_DATA_BASE64", None)
 
     while True:
         if currentOutputChunks != "":
-            print("--------------------------------------------------\n")
-            print(currentOutputChunks)
-            print("--------------------------------------------------\n")
+            parts = currentOutputChunks.split("[/INST]")
+            parsedResult = parts[1]
+            parsedResult = parsedResult.replace("</s>", "")
+            print("🟣 Mistral Question --------------------------------------------------\n")
+            print(last_prompt)
+            print("🟣 Mistral Answer --------------------------------------------------\n")
+            print(parsedResult)
+            if session_id != "":
+                send_response(respondJobURL, task["session_id"], "result", parsedResult)
+
         currentOutputChunks = ""
         currentJobData = ""
 
@@ -193,7 +202,7 @@ def do_inference(
             hasRunInitialJob = True
         else:
             # TODO: we need to include the fine-tuning model here
-            response = requests.get(f"{getJobURL}?mode=Create&type=Text&model_name=mistralai/Mistral-7B-Instruct-v0.1")
+            response = requests.get(getJobURL)
 
             if response.status_code != 200:
                 time.sleep(0.1)
@@ -201,21 +210,20 @@ def do_inference(
                 if waitLoops % 10 == 0:
                     print("--------------------------------------------------\n")
                     current_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    print(f"{current_timestamp} waiting for next job")
+                    print(f"{current_timestamp} waiting for next job {getJobURL} {response.status_code}")
                 continue
 
             waitLoops = 0
             currentJobData = response.content
 
         # print out the response content to stdout
-        print("--------------------------------------------------\n")
+        print("🟣 Mistral Job --------------------------------------------------\n")
         print(currentJobData)
-        print("--------------------------------------------------\n")
 
         task = json.loads(currentJobData)
         instruction: str = task["prompt"]
-
-        send_response(respondJobURL, task["session_id"], "begin", "")
+        session_id = task["session_id"]
+        last_prompt = instruction
 
         if prompter_module:
             prompt: str = next(
@@ -250,14 +258,8 @@ def do_inference(
                     generation_config=generation_config,
                     streamer=streamer,
                 )
-                # print("=" * 40)
-                # print(tokenizer.decode(generated["sequences"].cpu().tolist()[0]))
-                # print("=" * 40)
-        time.sleep(0.1)
-        send_response(respondJobURL, task["session_id"], "end", "")
-
-        #print("=" * 40)
-        #print(tokenizer.decode(generated["sequences"].cpu().tolist()[0]))
+                time.sleep(0.1)
+        
 
 
 def choose_config(path: Path):
