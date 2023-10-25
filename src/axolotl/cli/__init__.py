@@ -178,9 +178,7 @@ def do_inference(
 
     session_id = ""
     last_prompt = ""
-    hasRunInitialJob = False
-    initialJobData = os.environ.get("HELIX_INITIAL_JOB_DATA_BASE64", None)
-
+    
     while True:
         if currentOutputChunks != "":
             parts = currentOutputChunks.split("[/INST]")
@@ -196,25 +194,20 @@ def do_inference(
         currentOutputChunks = ""
         currentJobData = ""
 
-        if initialJobData is not None and hasRunInitialJob is False:
-            decoded_bytes = base64.b64decode(initialJobData)
-            currentJobData = decoded_bytes.decode("utf-8")
-            hasRunInitialJob = True
-        else:
-            # TODO: we need to include the fine-tuning model here
-            response = requests.get(getJobURL)
+        # TODO: we need to include the fine-tuning model here
+        response = requests.get(getJobURL)
 
-            if response.status_code != 200:
-                time.sleep(0.1)
-                waitLoops = waitLoops + 1
-                if waitLoops % 10 == 0:
-                    print("--------------------------------------------------\n")
-                    current_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    print(f"{current_timestamp} waiting for next job {getJobURL} {response.status_code}")
-                continue
+        if response.status_code != 200:
+            time.sleep(0.1)
+            waitLoops = waitLoops + 1
+            if waitLoops % 10 == 0:
+                print("--------------------------------------------------\n")
+                current_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                print(f"{current_timestamp} waiting for next job {getJobURL} {response.status_code}")
+            continue
 
-            waitLoops = 0
-            currentJobData = response.content
+        waitLoops = 0
+        currentJobData = response.content
 
         # print out the response content to stdout
         print("🟣 Mistral Job --------------------------------------------------\n")
