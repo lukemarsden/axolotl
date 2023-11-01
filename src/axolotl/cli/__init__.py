@@ -86,7 +86,7 @@ def do_merge_lora(
         )
         tokenizer.save_pretrained(str(Path(cfg.output_dir) / "merged"))
 
-currentOutputChunks = ""
+currentOutputChunks = []
 
 @contextmanager
 def redirect_stdout_to_function(func, buffer_size=1024, url="", sessionid=""):
@@ -128,7 +128,7 @@ def send_response(url, session_id, action, message):
 def capture_model_output_chunk(url, session_id, b):
     global currentOutputChunks
     message = b.decode('utf-8')
-    currentOutputChunks = currentOutputChunks + message
+    currentOutputChunks.append(message)
     send_response(url, session_id, "stream", message)
 
 def do_inference(
@@ -180,8 +180,8 @@ def do_inference(
     last_prompt = ""
     
     while True:
-        if currentOutputChunks != "":
-            parts = currentOutputChunks.split("[/INST]")
+        if len(currentOutputChunks) > 0:
+            parts = "".join(currentOutputChunks).split("[/INST]")
             parsedResult = parts[1]
             parsedResult = parsedResult.replace("</s>", "")
             print("🟣 Mistral Question --------------------------------------------------\n")
@@ -191,7 +191,7 @@ def do_inference(
             if session_id != "":
                 send_response(respondJobURL, task["session_id"], "result", parsedResult)
 
-        currentOutputChunks = ""
+        currentOutputChunks = []
         currentJobData = ""
 
         # TODO: we need to include the fine-tuning model here
