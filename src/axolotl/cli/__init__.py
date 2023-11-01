@@ -245,7 +245,7 @@ def do_inference(
                 output_scores=False,
             )
             streamer = TextStreamer(tokenizer)
-            with redirect_stdout_to_function(capture_model_output_chunk, buffer_size=20, url=respondJobURL, sessionid=task["session_id"]):
+            with redirect_stdout_to_function(capture_model_output_chunk, buffer_size=5, url=respondJobURL, sessionid=task["session_id"]):
                 generated = model.generate(
                     inputs=batch["input_ids"].to(cfg.device),
                     generation_config=generation_config,
