@@ -1,2 +1,4 @@
 venv
+venv.broken
 qlora-out
+lora-out
