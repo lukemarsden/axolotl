@@ -86,58 +86,14 @@ def do_merge_lora(
         )
         tokenizer.save_pretrained(str(Path(cfg.output_dir) / "merged"))
 
-currentOutputChunks = []
-
-@contextmanager
-def redirect_stdout_to_function(func, buffer_size=1024, url="", sessionid=""):
-    class BufferedBytesStream(io.BytesIO):
-        def __init__(self, buffer_size):
-            super().__init__()
-            self.buffer_size = buffer_size
-            self.buffer = bytearray()
-
-        def write(self, b):
-            if isinstance(b, str):
-                b = b.encode('utf-8')
-            self.buffer.extend(b)
-            while len(self.buffer) >= self.buffer_size:
-                chunk, self.buffer = self.buffer[:self.buffer_size], self.buffer[self.buffer_size:]
-                # this is capture_model_output_chunk
-                func(url, sessionid, chunk)
-
-    original_stdout = sys.stdout
-    sys.stdout = BufferedBytesStream(buffer_size)
-
-    try:
-        yield
-    finally:
-        # Flush remaining bytes in buffer, if any
-        if len(sys.stdout.buffer) > 0:
-            # this is capture_model_output_chunk
-            func(url, sessionid, sys.stdout.buffer)
-        sys.stdout = original_stdout
-
-def send_response(url, session_id, action, message):
-    json_payload = json.dumps({
-        "type": action,
-        "session_id": session_id,
-        "message": message
-    })
-    requests.post(url, data=json_payload)
-
-def capture_model_output_chunk(url, session_id, b):
-    global currentOutputChunks
-    message = b.decode('utf-8')
-    currentOutputChunks.append(message)
-    send_response(url, session_id, "stream", message)
-
 def do_inference(
     *,
     cfg: DictDefault,
     cli_args: TrainerCliArgs,
 ):
     global currentOutputChunks
-    waitLoops = 0
+
+    os.environ.setdefault("HOME", "/tmp")
 
     # the url of where we ask for new jobs
     # as soon as we have finished the current job, we will ask for another one
@@ -177,20 +133,8 @@ def do_inference(
     model = model.to(cfg.device)
 
     session_id = ""
-    last_prompt = ""
     
     while True:
-        if len(currentOutputChunks) > 0:
-            parts = "".join(currentOutputChunks).split("[/INST]")
-            parsedResult = parts[1]
-            parsedResult = parsedResult.replace("</s>", "")
-            print("🟣 Mistral Question --------------------------------------------------\n")
-            print(last_prompt)
-            print("🟣 Mistral Answer --------------------------------------------------\n")
-            print(parsedResult)
-            if session_id != "":
-                send_response(respondJobURL, task["session_id"], "result", parsedResult)
-
         currentOutputChunks = []
         currentJobData = ""
 
@@ -199,24 +143,17 @@ def do_inference(
 
         if response.status_code != 200:
             time.sleep(0.1)
-            waitLoops = waitLoops + 1
-            if waitLoops % 10 == 0:
-                print("--------------------------------------------------\n")
-                current_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                print(f"{current_timestamp} waiting for next job {getJobURL} {response.status_code}")
             continue
 
-        waitLoops = 0
         currentJobData = response.content
 
         # print out the response content to stdout
-        print("🟣 Mistral Job --------------------------------------------------\n")
+        print("🟣 Mistral Job --------------------------------------------------")
         print(currentJobData)
 
         task = json.loads(currentJobData)
         instruction: str = task["prompt"]
         session_id = task["session_id"]
-        last_prompt = instruction
 
         if prompter_module:
             prompt: str = next(
@@ -245,15 +182,13 @@ def do_inference(
                 output_scores=False,
             )
             streamer = TextStreamer(tokenizer)
-            with redirect_stdout_to_function(capture_model_output_chunk, buffer_size=5, url=respondJobURL, sessionid=task["session_id"]):
-                generated = model.generate(
-                    inputs=batch["input_ids"].to(cfg.device),
-                    generation_config=generation_config,
-                    streamer=streamer,
-                )
-                time.sleep(0.1)
-        
-
+            print(f"[SESSION_START]session_id={session_id}", file=sys.stdout)
+            model.generate(
+                inputs=batch["input_ids"].to(cfg.device),
+                generation_config=generation_config,
+                streamer=streamer,
+            )
+            print(f"[SESSION_END]session_id={session_id}", file=sys.stdout)
 
 def choose_config(path: Path):
     yaml_files = list(path.glob("*.yml"))
