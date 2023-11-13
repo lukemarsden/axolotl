@@ -110,47 +110,46 @@ def do_inference(
 
     model = model.to(cfg.device)
 
-    while True:
-        #print("=" * 80)
-        # support for multiline inputs
-        instruction = get_multi_line_input()
-        if not instruction:
-            return
-        if prompter_module:
-            prompt: str = next(
-                prompter_module().build_prompt(instruction=instruction.strip("\n"))
-            )
-        else:
-            prompt = instruction.strip()
-        batch = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
+    #print("=" * 80)
+    # support for multiline inputs
+    instruction = os.getenv("PROMPT")
+    if not instruction:
+        return
+    if prompter_module:
+        prompt: str = next(
+            prompter_module().build_prompt(instruction=instruction.strip("\n"))
+        )
+    else:
+        prompt = instruction.strip()
+    batch = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
 
-        print("[START]")
-        model.eval()
-        with torch.no_grad():
-            generation_config = GenerationConfig(
-                repetition_penalty=1.1,
-                max_new_tokens=1024,
-                temperature=0.9,
-                top_p=0.95,
-                top_k=40,
-                bos_token_id=tokenizer.bos_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-                pad_token_id=tokenizer.pad_token_id,
-                do_sample=True,
-                use_cache=True,
-                return_dict_in_generate=True,
-                output_attentions=False,
-                output_hidden_states=False,
-                output_scores=False,
-            )
-            streamer = TextStreamer(tokenizer)
-            generated = model.generate(
-                inputs=batch["input_ids"].to(cfg.device),
-                generation_config=generation_config,
-                streamer=streamer,
-            )
-        #print("=" * 40)
-        #print(tokenizer.decode(generated["sequences"].cpu().tolist()[0]))
+    print("[START]")
+    model.eval()
+    with torch.no_grad():
+        generation_config = GenerationConfig(
+            repetition_penalty=1.1,
+            max_new_tokens=1024,
+            temperature=0.9,
+            top_p=0.95,
+            top_k=40,
+            bos_token_id=tokenizer.bos_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.pad_token_id,
+            do_sample=True,
+            use_cache=True,
+            return_dict_in_generate=True,
+            output_attentions=False,
+            output_hidden_states=False,
+            output_scores=False,
+        )
+        streamer = TextStreamer(tokenizer)
+        generated = model.generate(
+            inputs=batch["input_ids"].to(cfg.device),
+            generation_config=generation_config,
+            streamer=streamer,
+        )
+    #print("=" * 40)
+    #print(tokenizer.decode(generated["sequences"].cpu().tolist()[0]))
 
 
 def choose_config(path: Path):
