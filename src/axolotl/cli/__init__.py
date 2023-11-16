@@ -98,14 +98,10 @@ def do_inference(
     # the url of where we ask for new jobs
     # as soon as we have finished the current job, we will ask for another one
     # if this fails - it means there are no jobs so wait 1 second then ask again
-    getJobURL = os.environ.get("HELIX_GET_JOB_URL", None)
-    respondJobURL = os.environ.get("HELIX_RESPOND_JOB_URL", None)
+    getJobURL = os.environ.get("HELIX_NEXT_TASK_URL", None)
 
     if getJobURL is None:
-        sys.exit("HELIX_GET_JOB_URL is not set")
-
-    if respondJobURL is None:
-        sys.exit("HELIX_RESPOND_JOB_URL is not set")
+        sys.exit("HELIX_NEXT_TASK_URL is not set")
 
     model, tokenizer = load_model_and_tokenizer(cfg=cfg, cli_args=cli_args)
     prompter = cli_args.prompter
