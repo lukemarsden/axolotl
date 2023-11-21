@@ -99,10 +99,39 @@ def do_inference(
     # as soon as we have finished the current job, we will ask for another one
     # if this fails - it means there are no jobs so wait 1 second then ask again
     getJobURL = os.environ.get("HELIX_NEXT_TASK_URL", None)
+    readSessionURL = os.environ.get("HELIX_INITIAL_SESSION_URL", "")
 
     if getJobURL is None:
         sys.exit("HELIX_NEXT_TASK_URL is not set")
 
+    if readSessionURL == "":
+        sys.exit("HELIX_INITIAL_SESSION_URL is not set")
+    
+    lora_dir = ""
+    waiting_for_initial_session = True
+
+    # we need to load the first task to know what the Lora weights are
+    # perhaps there are no lora weights in which case we will skip
+    # this step - we are not popping the task from the queue
+    # rather waiting until it appears so we can know what lora weights to
+    # load (if any)
+    while waiting_for_initial_session:
+        response = requests.get(readSessionURL)
+        if response.status_code != 200:
+            time.sleep(0.1)
+            continue
+        
+        session = json.loads(response.content)
+        waiting_for_initial_session = False
+        lora_dir = session["lora_dir"]
+
+    if lora_dir != "":
+        print("🟡🟡🟡 Lora dir --------------------------------------------------\n")
+        print(lora_dir)
+        cfg['lora_model_dir'] = lora_dir
+
+    import pprint; pprint.pprint(cfg)
+    
     model, tokenizer = load_model_and_tokenizer(cfg=cfg, cli_args=cli_args)
     prompter = cli_args.prompter
     default_tokens = {"unk_token": "<unk>", "bos_token": "<s>", "eos_token": "</s>"}
@@ -144,7 +173,7 @@ def do_inference(
         currentJobData = response.content
 
         # print out the response content to stdout
-        print("🟣 Mistral Job --------------------------------------------------")
+        print("🟣🟣🟣 Mistral Job --------------------------------------------------")
         print(currentJobData)
 
         task = json.loads(currentJobData)

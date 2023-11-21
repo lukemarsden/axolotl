@@ -45,7 +45,7 @@ def do_cli(config: Path = Path("examples/"), **kwargs):
         print(task)
 
         session_id = task["session_id"]
-        finetune_file = task["finetune_file"]
+        dataset_dir = task["dataset_dir"]
 
         results_dir = f"/tmp/helix/results/{session_id}"
         
@@ -55,7 +55,7 @@ def do_cli(config: Path = Path("examples/"), **kwargs):
         print_axolotl_text_art()
         parsed_cfg = load_cfg(config, **kwargs)
 
-        parsed_cfg["datasets"][0]["path"] = finetune_file
+        parsed_cfg["datasets"][0]["path"] = f"{dataset_dir}/finetune_dataset.jsonl"
         parsed_cfg["datasets"][0]["type"] = "sharegpt"
         parsed_cfg["datasets"][0]["ds_type"] = "json"
         parsed_cfg["output_dir"] = results_dir
@@ -71,7 +71,7 @@ def do_cli(config: Path = Path("examples/"), **kwargs):
         print(f"[SESSION_START]session_id={session_id}", file=sys.stdout)
         dataset_meta = load_datasets(cfg=parsed_cfg, cli_args=parsed_cli_args)
         train(cfg=parsed_cfg, cli_args=parsed_cli_args, dataset_meta=dataset_meta)
-        print(f"[SESSION_END]results_dir={results_dir}", file=sys.stdout)
+        print(f"[SESSION_END_LORA_DIR]lora_dir={results_dir}", file=sys.stdout)
 
 
 if __name__ == "__main__":
