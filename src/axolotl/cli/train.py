@@ -4,6 +4,7 @@ CLI to run training on a model
 import logging
 from pathlib import Path
 import os
+import shutil
 import sys
 import fire
 import tempfile
@@ -26,6 +27,12 @@ from axolotl.train import train
 
 LOG = logging.getLogger("axolotl.cli.train")
 
+def remove_folders_with_prefix(directory, prefix):
+    for item in os.listdir(directory):
+        item_path = os.path.join(directory, item)
+        if os.path.isdir(item_path) and item.startswith(prefix):
+            shutil.rmtree(item_path)
+            print(f"Removed directory: {item_path}")
 
 def do_cli(config: Path = Path("examples/"), **kwargs):
     getJobURL = os.environ.get("HELIX_NEXT_TASK_URL", None)
@@ -71,8 +78,8 @@ def do_cli(config: Path = Path("examples/"), **kwargs):
         print(f"[SESSION_START]session_id={session_id}", file=sys.stdout)
         dataset_meta = load_datasets(cfg=parsed_cfg, cli_args=parsed_cli_args)
         train(cfg=parsed_cfg, cli_args=parsed_cli_args, dataset_meta=dataset_meta)
+        remove_folders_with_prefix(results_dir, "checkpoint")
         print(f"[SESSION_END_LORA_DIR]lora_dir={results_dir}", file=sys.stdout)
-
 
 if __name__ == "__main__":
     fire.Fire(do_cli)
