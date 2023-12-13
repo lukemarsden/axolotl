@@ -5,13 +5,20 @@ import logging
 import os
 import random
 import sys
+import io
+import base64
 from pathlib import Path
 from threading import Thread
 from typing import Any, Dict, List, Optional, Union
+import json
+import time
+import requests
+from datetime import datetime
 
 import gradio as gr
 import torch
 import yaml
+from contextlib import contextmanager
 
 # add src to the pythonpath so we don't need to pip install this
 from accelerate.commands.config import config_args
@@ -82,12 +89,52 @@ def do_merge_lora(
         )
         tokenizer.save_pretrained(str(Path(cfg.output_dir) / "merged"))
 
-
 def do_inference(
     *,
     cfg: DictDefault,
     cli_args: TrainerCliArgs,
 ):
+    global currentOutputChunks
+
+    os.environ.setdefault("HOME", "/tmp")
+
+    # the url of where we ask for new jobs
+    # as soon as we have finished the current job, we will ask for another one
+    # if this fails - it means there are no jobs so wait 1 second then ask again
+    getJobURL = os.environ.get("HELIX_NEXT_TASK_URL", None)
+    readSessionURL = os.environ.get("HELIX_INITIAL_SESSION_URL", "")
+
+    if getJobURL is None:
+        sys.exit("HELIX_NEXT_TASK_URL is not set")
+
+    if readSessionURL == "":
+        sys.exit("HELIX_INITIAL_SESSION_URL is not set")
+    
+    lora_dir = ""
+    waiting_for_initial_session = True
+
+    # we need to load the first task to know what the Lora weights are
+    # perhaps there are no lora weights in which case we will skip
+    # this step - we are not popping the task from the queue
+    # rather waiting until it appears so we can know what lora weights to
+    # load (if any)
+    while waiting_for_initial_session:
+        response = requests.get(readSessionURL)
+        if response.status_code != 200:
+            time.sleep(0.1)
+            continue
+        
+        session = json.loads(response.content)
+        waiting_for_initial_session = False
+        lora_dir = session["lora_dir"]
+
+    if lora_dir != "":
+        print("🟡🟡🟡 Lora dir --------------------------------------------------\n")
+        print(lora_dir)
+        cfg['lora_model_dir'] = lora_dir
+
+    import pprint; pprint.pprint(cfg)
+    
     model, tokenizer = load_model_and_tokenizer(cfg=cfg, cli_args=cli_args)
     prompter = cli_args.prompter
     default_tokens = {"unk_token": "<unk>", "bos_token": "<s>", "eos_token": "</s>"}
@@ -113,12 +160,29 @@ def do_inference(
 
     model = model.to(cfg.device)
 
+    session_id = ""
+    
     while True:
-        #print("=" * 80)
-        # support for multiline inputs
-        instruction = get_multi_line_input()
-        if not instruction:
-            return
+        currentOutputChunks = []
+        currentJobData = ""
+
+        # TODO: we need to include the fine-tuning model here
+        response = requests.get(getJobURL)
+
+        if response.status_code != 200:
+            time.sleep(0.1)
+            continue
+
+        currentJobData = response.content
+
+        # print out the response content to stdout
+        print("🟣🟣🟣 Mistral Job --------------------------------------------------")
+        print(currentJobData)
+
+        task = json.loads(currentJobData)
+        instruction: str = task["prompt"]
+        session_id = task["session_id"]
+
         if prompter_module:
             prompt: str = next(
                 prompter_module().build_prompt(instruction=instruction.strip("\n"))
@@ -127,7 +191,6 @@ def do_inference(
             prompt = instruction.strip()
         batch = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
 
-        print("[START]")
         model.eval()
         with torch.no_grad():
             generation_config = GenerationConfig(
@@ -147,14 +210,13 @@ def do_inference(
                 output_scores=False,
             )
             streamer = TextStreamer(tokenizer)
-            generated = model.generate(
+            print(f"[SESSION_START]session_id={session_id}", file=sys.stdout)
+            model.generate(
                 inputs=batch["input_ids"].to(cfg.device),
                 generation_config=generation_config,
                 streamer=streamer,
             )
-        #print("=" * 40)
-        #print(tokenizer.decode(generated["sequences"].cpu().tolist()[0]))
-
+            print(f"[SESSION_END]session_id={session_id}", file=sys.stdout)
 
 def do_inference_gradio(
     *,
