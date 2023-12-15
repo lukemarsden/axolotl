@@ -216,7 +216,6 @@ def do_inference(
                 generation_config=generation_config,
                 streamer=streamer,
             )
-            print(f"I used lora '{lora_dir}'")
             print(f"[SESSION_END]session_id={session_id}", file=sys.stdout)
 
 def do_inference_gradio(
