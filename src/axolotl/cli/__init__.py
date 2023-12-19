@@ -210,13 +210,13 @@ def do_inference(
                 output_scores=False,
             )
             streamer = TextStreamer(tokenizer, skip_prompt=True)
-            print(f"[SESSION_START]session_id={session_id}", file=sys.stdout)
+            print(f" [SESSION_START]session_id={session_id} ", file=sys.stdout)
             model.generate(
                 inputs=batch["input_ids"].to(cfg.device),
                 generation_config=generation_config,
                 streamer=streamer,
             )
-            print(f"[SESSION_END]session_id={session_id}", file=sys.stdout)
+            print(f" [SESSION_END]session_id={session_id} ", file=sys.stdout)
 
 def do_inference_gradio(
     *,
