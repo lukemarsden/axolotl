@@ -209,7 +209,7 @@ def do_inference(
                 output_hidden_states=False,
                 output_scores=False,
             )
-            streamer = TextStreamer(tokenizer)
+            streamer = TextStreamer(tokenizer, skip_prompt=True)
             print(f"[SESSION_START]session_id={session_id}", file=sys.stdout)
             model.generate(
                 inputs=batch["input_ids"].to(cfg.device),
