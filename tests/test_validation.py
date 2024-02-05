@@ -1,6 +1,7 @@
 """Module for testing the validation module"""
 
 import logging
+import os
 import unittest
 from typing import Optional
 
@@ -8,6 +9,7 @@ import pytest
 
 from axolotl.utils.config import validate_config
 from axolotl.utils.dict import DictDefault
+from axolotl.utils.wandb_ import setup_wandb_env_vars
 
 
 class ValidationTest(unittest.TestCase):
@@ -565,3 +567,197 @@ class ValidationTest(unittest.TestCase):
         )
 
         validate_config(cfg)
+
+    def test_eval_table_size_conflict_eval_packing(self):
+        cfg = DictDefault(
+            {
+                "sample_packing": True,
+                "eval_table_size": 100,
+            }
+        )
+
+        with pytest.raises(
+            ValueError, match=r".*Please set 'eval_sample_packing' to false.*"
+        ):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "sample_packing": True,
+                "eval_sample_packing": False,
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "sample_packing": False,
+                "eval_table_size": 100,
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "sample_packing": True,
+                "eval_table_size": 100,
+                "eval_sample_packing": False,
+            }
+        )
+
+        validate_config(cfg)
+
+    def test_load_in_x_bit_without_adapter(self):
+        cfg = DictDefault(
+            {
+                "load_in_4bit": True,
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r".*load_in_8bit and load_in_4bit are not supported without setting an adapter.*",
+        ):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "load_in_8bit": True,
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r".*load_in_8bit and load_in_4bit are not supported without setting an adapter.*",
+        ):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "load_in_4bit": True,
+                "adapter": "qlora",
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "load_in_8bit": True,
+                "adapter": "lora",
+            }
+        )
+
+        validate_config(cfg)
+
+    def test_warmup_step_no_conflict(self):
+        cfg = DictDefault(
+            {
+                "warmup_steps": 10,
+                "warmup_ratio": 0.1,
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r".*warmup_steps and warmup_ratio are mutually exclusive*",
+        ):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "warmup_steps": 10,
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "warmup_ratio": 0.1,
+            }
+        )
+
+        validate_config(cfg)
+
+
+class ValidationWandbTest(ValidationTest):
+    """
+    Validation test for wandb
+    """
+
+    def test_wandb_set_run_id_to_name(self):
+        cfg = DictDefault(
+            {
+                "wandb_run_id": "foo",
+            }
+        )
+
+        with self._caplog.at_level(logging.WARNING):
+            validate_config(cfg)
+            assert any(
+                "wandb_run_id sets the ID of the run. If you would like to set the name, please use wandb_name instead."
+                in record.message
+                for record in self._caplog.records
+            )
+
+            assert cfg.wandb_name == "foo" and cfg.wandb_run_id == "foo"
+
+        cfg = DictDefault(
+            {
+                "wandb_name": "foo",
+            }
+        )
+
+        validate_config(cfg)
+
+        assert cfg.wandb_name == "foo" and cfg.wandb_run_id is None
+
+    def test_wandb_sets_env(self):
+        cfg = DictDefault(
+            {
+                "wandb_project": "foo",
+                "wandb_name": "bar",
+                "wandb_run_id": "bat",
+                "wandb_entity": "baz",
+                "wandb_mode": "online",
+                "wandb_watch": "false",
+                "wandb_log_model": "checkpoint",
+            }
+        )
+
+        validate_config(cfg)
+
+        setup_wandb_env_vars(cfg)
+
+        assert os.environ.get("WANDB_PROJECT", "") == "foo"
+        assert os.environ.get("WANDB_NAME", "") == "bar"
+        assert os.environ.get("WANDB_RUN_ID", "") == "bat"
+        assert os.environ.get("WANDB_ENTITY", "") == "baz"
+        assert os.environ.get("WANDB_MODE", "") == "online"
+        assert os.environ.get("WANDB_WATCH", "") == "false"
+        assert os.environ.get("WANDB_LOG_MODEL", "") == "checkpoint"
+        assert os.environ.get("WANDB_DISABLED", "") != "true"
+
+    def test_wandb_set_disabled(self):
+        cfg = DictDefault({})
+
+        validate_config(cfg)
+
+        setup_wandb_env_vars(cfg)
+
+        assert os.environ.get("WANDB_DISABLED", "") == "true"
+
+        cfg = DictDefault(
+            {
+                "wandb_project": "foo",
+            }
+        )
+
+        validate_config(cfg)
+
+        setup_wandb_env_vars(cfg)
+
+        assert os.environ.get("WANDB_DISABLED", "") != "true"
